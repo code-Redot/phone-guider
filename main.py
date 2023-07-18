@@ -1,60 +1,44 @@
-__version__ = '0.1'
-
+# coding:utf-8
 from kivy.app import App
-from jnius import autoclass, cast
+from kivy.uix.image import Image
+from kivy.clock import Clock
+from kivy.graphics.texture import Texture
+from kivy.utils import platform
 
-from PIL import Image
+import cv2
 
-from android import activity, mActivity
-from android.permissions import request_permissions, Permission
-from android.storage import primary_external_storage_path
-request_permissions([Permission.CAMERA, Permission.READ_EXTERNAL_STORAGE])
+class KivyCamera(Image):
+    def __init__(self, capture, fps, **kwargs):
+        super(KivyCamera, self).__init__(**kwargs)
+        self.capture = capture
+        Clock.schedule_interval(self.update, 1.0 / fps)
 
-from kivy.logger import Logger
-from kivy.config import Config
-Config.set('kivy', 'log_level', 'debug')
-Config.set('kivy', 'log_dir', 'logs')
-Config.set('kivy', 'log_name', 'kivy_%y-%m-%d_%_.txt')
-Config.set('kivy', 'log_enable', 1)
-Config.write()
-Logger.debug("DEBUG: primary_external_storage_path")
-Logger.debug("DEBUG: %s", primary_external_storage_path())
+    def update(self, dt):
+        ret, frame = self.capture.read()
+        if ret:
+            # convert it to texture
+            buf1 = cv2.flip(frame, 0)
+            buf = buf1.tostring()
+            image_texture = Texture.create(
+                size=(frame.shape[1], frame.shape[0]), colorfmt='bgr')
+            image_texture.blit_buffer(buf, colorfmt='bgr', bufferfmt='ubyte')
+            # display image from the texture
+            self.texture = image_texture
 
-Intent = autoclass('android.content.Intent')
-MediaStore = autoclass('android.provider.MediaStore')
-Environment = autoclass('android.os.Environment')
-Context = autoclass("android.content.Context")
-FileProvider = autoclass('android.support.v4.content.FileProvider')
-PythonActivity = autoclass("org.kivy.android.PythonActivity").mActivity
 
-class TakePictureApp(App):
-    def take_picture(self):
-        def create_img_file():
-            File = autoclass('java.io.File')
-            storageDir = Context.getExternalFilesDir(Environment.DIRECTORY_PICTURES)
+class CamApp(App):
+    def build(self):
+        if platform == 'android':
+            self.capture = cv2.VideoCapture(0)
+        else:
+            self.capture = cv2.VideoCapture(1)
+        self.my_camera = KivyCamera(capture=self.capture, fps=30)
+        return self.my_camera
 
-            imageFile = File(
-                storageDir,
-                "temp.jpg"
-            )
-            imageFile.createNewFile()
-            return imageFile
+    def on_stop(self):
+        # without this, app will not exit even if the window is closed
+        self.capture.release()
 
-        intent = Intent(MediaStore.ACTION_IMAGE_CAPTURE)
 
-        photoFile = create_img_file()
-        photoUri = FileProvider.getUriForFile(
-            Context.getApplicationContext(),
-            "org.test.takepicture.fileprovider",
-            photoFile
-        )
-
-        parcelable = cast('android.os.Parcelable', photoUri)
-
-        intent.putExtra(MediaStore.EXTRA_OUTPUT, parcelable)
-        mActivity.startActivityForResult(intent, 0x123)
-
-    def on_pause(self):
-        return True
-
-TakePictureApp().run()
+if __name__ == '__main__':
+    CamApp().run()
